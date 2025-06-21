@@ -1,0 +1,41 @@
+Objetivo: Desenvolver um dashboard de página única em React para visualizar e analisar dados de acompanhamento de um programa de mentoria. O dashboard deve ser interativo, rico em insights e construído com boas práticas de desenvolvimento.
+Stack de Tecnologia:
+Frontend: React (usando Hooks)
+Estilização: Tailwind CSS
+Ícones: Lucide React
+Gráficos: Recharts
+Fonte de Dados:
+Utilize os dados do arquivo CSV que o usuário vai fornecer. Crie uma função para simular uma chamada de API assíncrona (fetchData) que retorna os dados parseados. Ao parsear, normalize os cabeçalhos das colunas para camelCase (ex: Nome do Jovem -> nomeJovem).
+Funcionalidades Requeridas:
+Layout Geral:
+Um cabeçalho principal com o título "Dashboard de Acompanhamento de Mentorias".
+Uma seção de filtros globais.
+Uma grade de KPIs (Key Performance Indicators).
+Uma área principal para gráficos.
+Uma lista de atividades recentes na parte inferior.
+Seção de Filtros:
+Dois menus suspensos (select) para filtrar os dados por:
+Mentor (nomeMentor)
+Jovem (nomeJovem)
+As opções dos menus devem ser populadas dinamicamente a partir dos dados.
+Um botão "Limpar Filtros" que reseta ambas as seleções para "Todos".
+Os filtros devem atualizar todos os KPIs e gráficos do dashboard em tempo real.
+Grade de KPIs (Componente KpiGrid):
+Crie um componente reutilizável KpiCard e exiba os seguintes indicadores:
+Total de Respostas: Contagem total de formulários preenchidos.
+Duplas Ativas: Contagem de pares únicos de mentor-jovem.
+Média de Encontros: Média de encontros realizados por dupla.
+Duplas com Atenção: Contagem de duplas cujo último registro indica um "ponto de atenção" (não "Nenhum").
+Visualizações de Dados (Gráficos):
+Gráfico 1: Avaliação da Mentoria (Bar Chart):
+Um gráfico de barras horizontal mostrando a contagem de cada tipo de avaliação ("Excelente", "Bom", "Regular", etc.).
+O eixo Y deve ter os nomes das avaliações e o eixo X a contagem.
+Gráfico 2: Funil do Programa (Funnel Chart ou Bar Chart):
+Um gráfico que mostra a distribuição das duplas pelas fases do programa: "Não iniciou", "Início", "Meio", "Fim".
+Isso deve visualizar claramente o progresso geral dos participantes.
+Lista de Atividades Recentes:
+Exiba os 5 registros mais recentes (baseado no timestamp).
+Cada item da lista deve mostrar:
+O nome da dupla (Jovem & Mentor).
+A data do registro, formatada de forma amigável (ex: "30 de maio de 2024, 20:00").
+O principal Destaque e o principal Ponto de Atenção, cada um precedido por um ícone apropriado (ex: TrendingUp para destaque, AlertTriangle para atenção).
