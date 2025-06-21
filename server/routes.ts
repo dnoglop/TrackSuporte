@@ -61,20 +61,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).length;
 
       // Generate evaluation chart data
-      const ratingCounts = { '0-4': 0, '5-6': 0, '7-8': 0, '9-10': 0 };
+      const ratingCounts = { 'insatisfeito': 0, 'ruim': 0, 'bom': 0, 'excelente': 0 };
       filteredData.forEach(row => {
         const rating = parseInt(row.meetingRating);
-        if (rating >= 0 && rating <= 4) ratingCounts['0-4']++;
-        else if (rating >= 5 && rating <= 6) ratingCounts['5-6']++;
-        else if (rating >= 7 && rating <= 8) ratingCounts['7-8']++;
-        else if (rating >= 9 && rating <= 10) ratingCounts['9-10']++;
+        if (!isNaN(rating)) {
+          if (rating >= 0 && rating <= 5) ratingCounts['insatisfeito']++;
+          else if (rating >= 6 && rating <= 7) ratingCounts['ruim']++;
+          else if (rating === 8) ratingCounts['bom']++;
+          else if (rating >= 9 && rating <= 10) ratingCounts['excelente']++;
+        }
       });
 
       const evaluation = [
-        { name: 'Insatisfatório', value: ratingCounts['0-4'] },
-        { name: 'Regular', value: ratingCounts['5-6'] },
-        { name: 'Bom', value: ratingCounts['7-8'] },
-        { name: 'Excelente', value: ratingCounts['9-10'] },
+        { name: 'Insatisfeito', value: ratingCounts['insatisfeito'] },
+        { name: 'Ruim', value: ratingCounts['ruim'] },
+        { name: 'Bom', value: ratingCounts['bom'] },
+        { name: 'Excelente', value: ratingCounts['excelente'] },
       ];
 
       // Generate program funnel data (based on meetings count)
@@ -117,19 +119,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Generate mentor vs mentee analysis
       const mentorData = filteredData.filter(row => row.userType.toLowerCase().includes('mentor'));
-      const menteeData = filteredData.filter(row => row.userType.toLowerCase().includes('mentee') || row.userType.toLowerCase().includes('jovem'));
+      const menteeData = filteredData.filter(row => 
+        row.userType.toLowerCase().includes('mentorado') || 
+        row.userType.toLowerCase().includes('jovem')
+      );
 
       const mentorVsMentee = [
         {
           userType: 'Mentores',
           averageRating: mentorData.length > 0 ? 
-            mentorData.reduce((sum, row) => sum + parseInt(row.meetingRating), 0) / mentorData.length : 0,
+            mentorData.reduce((sum, row) => {
+              const rating = parseInt(row.meetingRating);
+              return sum + (isNaN(rating) ? 0 : rating);
+            }, 0) / mentorData.length : 0,
           count: mentorData.length
         },
         {
           userType: 'Mentorados',
           averageRating: menteeData.length > 0 ? 
-            menteeData.reduce((sum, row) => sum + parseInt(row.meetingRating), 0) / menteeData.length : 0,
+            menteeData.reduce((sum, row) => {
+              const rating = parseInt(row.meetingRating);
+              return sum + (isNaN(rating) ? 0 : rating);
+            }, 0) / menteeData.length : 0,
           count: menteeData.length
         }
       ];
