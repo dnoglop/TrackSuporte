@@ -29,7 +29,7 @@ export default defineConfig({
   // CORRETO: A raiz do seu site (onde o index.html está) é a pasta "client".
   root: path.resolve(import.meta.dirname, "client"),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
   },
   server: {
