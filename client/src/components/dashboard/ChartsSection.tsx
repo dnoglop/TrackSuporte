@@ -14,6 +14,8 @@ export default function ChartsSection({ charts }: ChartsSectionProps) {
     negative: '#EF4444'
   };
 
+
+
   return (
     <div className="space-y-6">
       {/* First Row - Main Charts */}
@@ -33,12 +35,39 @@ export default function ChartsSection({ charts }: ChartsSectionProps) {
           <h3 className="text-lg font-medium text-gray-900 mb-4">Avaliação da Mentoria</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={charts.evaluation} layout="horizontal">
+              <BarChart 
+                data={charts.evaluation} 
+                layout="horizontal" 
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" />
-                <YAxis type="category" dataKey="name" width={100} />
-                <Tooltip />
-                <Bar dataKey="value" fill="hsl(207, 90%, 54%)" radius={[0, 4, 4, 0]} />
+                <XAxis 
+                  type="number" 
+                  domain={[0, 'dataMax + 20']}
+                  tick={{ fontSize: 12 }}
+                />
+                <YAxis 
+                  type="category" 
+                  dataKey="name" 
+                  width={80}
+                  tick={{ fontSize: 12 }}
+                />
+                <Tooltip 
+                  formatter={(value) => [value, 'Respostas']}
+                  labelStyle={{ color: '#374151' }}
+                  contentStyle={{ 
+                    backgroundColor: '#f9fafb',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px'
+                  }}
+                />
+                <Bar 
+                  dataKey="value" 
+                  fill="#3B82F6" 
+                  radius={[0, 4, 4, 0]}
+                  stroke="#1E40AF"
+                  strokeWidth={1}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>

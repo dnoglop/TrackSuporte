@@ -49,7 +49,14 @@ Mantenha a resposta entre 50-100 palavras, sendo profissional e encorajadora.
       return analysis.trim();
     } catch (error) {
       console.error('Error analyzing feedback with Gemini:', error);
-      throw new Error(`Failed to analyze feedback: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Handle rate limit errors gracefully
+      if (error.status === 429) {
+        return "Análise de IA temporariamente indisponível devido ao limite de requisições. Tente novamente em alguns minutos.";
+      }
+      
+      // For other errors, return a fallback message
+      return "Análise de IA temporariamente indisponível. Verifique os dados fornecidos.";
     }
   }
 

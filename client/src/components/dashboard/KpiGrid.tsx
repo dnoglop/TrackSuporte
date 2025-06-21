@@ -8,6 +8,8 @@ interface KpiGridProps {
 }
 
 export default function KpiGrid({ kpis }: KpiGridProps) {
+
+  
   const kpiCards = [
     {
       title: "Total de Respostas",
