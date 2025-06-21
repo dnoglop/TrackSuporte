@@ -1,3 +1,5 @@
+// vite.config.ts
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -18,11 +20,13 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
+      // CORRETO: O atalho "@" aponta para a pasta "src" dentro de "client".
+      "@": path.resolve(import.meta.dirname, "client/src"),
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
   },
+  // CORRETO: A raiz do seu site (onde o index.html está) é a pasta "client".
   root: path.resolve(import.meta.dirname, "client"),
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),

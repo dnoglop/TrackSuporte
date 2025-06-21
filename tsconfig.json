@@ -1,3 +1,5 @@
+// tsconfig.json
+
 {
   "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
   "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
@@ -16,6 +18,7 @@
     "baseUrl": ".",
     "types": ["node", "vite/client"],
     "paths": {
+      // CORRETO: O atalho "@/*" aponta para "./client/src/*".
       "@/*": ["./client/src/*"],
       "@shared/*": ["./shared/*"]
     }

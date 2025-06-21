@@ -1,9 +1,13 @@
-import { GoogleGenAI } from "@google/genai";
+// server/services/gemini.ts
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Initialize Gemini AI with API key
-const ai = new GoogleGenAI({ 
-  apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "" 
-});
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+  throw new Error("GEMINI_API_KEY is not set.");
+}
+
+// Correção: usar GoogleGenerativeAI em vez de GoogleGenAI
+const genAI = new GoogleGenerativeAI(apiKey);
 
 export interface FeedbackAnalysisInput {
   meetingRating: number;
@@ -14,13 +18,23 @@ export interface FeedbackAnalysisInput {
 
 export interface FeedbackAnalysisResult {
   analysis: string;
-  sentiment: 'positive' | 'neutral' | 'negative';
-  recommendations: string[];
-  attentionPoints: string[];
+  sentiment: "positivo" | "neutro" | "negativo";
+  sentimentScore: number; // 1-10 onde 1-3=negativo, 4-7=neutro, 8-10=positivo
 }
 
 export class GeminiService {
-  async analyzeFeedback(feedbackData: FeedbackAnalysisInput): Promise<string> {
+  async analyzeFeedback(
+    feedbackData: FeedbackAnalysisInput,
+  ): Promise<FeedbackAnalysisResult> {
+    if (!feedbackData.experience && !feedbackData.comments) {
+      return {
+        analysis:
+          "Não foi possível gerar análise pois não há comentários ou descrição da experiência.",
+        sentiment: "neutro",
+        sentimentScore: 5,
+      };
+    }
+
     try {
       const prompt = `
 Analise os seguintes dados de feedback de uma sessão de mentoria e forneça insights valiosos:
@@ -31,219 +45,93 @@ Dados da sessão:
 - Nota de engajamento da dupla (0-10): ${feedbackData.engagementRating}
 - Comentários adicionais: "${feedbackData.comments}"
 
-Forneça uma análise concisa e construtiva em português brasileiro que inclua:
+IMPORTANTE: Retorne sua resposta em formato JSON válido com a seguinte estrutura:
+{
+  "analysis": "sua análise aqui",
+  "sentiment": "positivo|neutro|negativo",
+  "sentimentScore": número_de_1_a_10
+}
+
+Para a análise, forneça uma análise concisa e construtiva em português brasileiro que inclua:
 1. Uma avaliação geral do progresso da dupla
 2. Pontos positivos identificados
 3. Áreas que necessitam atenção (se houver)
 4. Recomendações específicas para melhorar a mentoria
 
-Mantenha a resposta entre 50-100 palavras, sendo profissional e encorajadora.
+Para o sentiment:
+- "positivo": feedback majoritariamente positivo, notas altas, comentários encorajadores
+- "neutro": feedback misto ou moderado, sem tendência clara
+- "negativo": feedback com críticas, notas baixas, insatisfação expressa
+
+Para sentimentScore:
+- 1-3: Negativo (notas baixas, muitas críticas, insatisfação)
+- 4-7: Neutro (feedback moderado, misto)
+- 8-10: Positivo (notas altas, elogios, satisfação)
+
+Mantenha a análise entre 50-100 palavras, sendo profissional e encorajadora.
+Retorne APENAS o JSON, sem texto adicional.
 `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
+      // Correção: usar o nome correto do modelo
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      const analysis = response.text || "Análise de IA temporariamente indisponível";
-      return analysis.trim();
-    } catch (error) {
-      console.error('Error analyzing feedback with Gemini:', error);
-      
-      // Handle rate limit errors gracefully
-      if (error.status === 429) {
-        return "Análise de IA temporariamente indisponível devido ao limite de requisições. Tente novamente em alguns minutos.";
-      }
-      
-      // For other errors, return a fallback message
-      return "Análise de IA temporariamente indisponível. Verifique os dados fornecidos.";
-    }
-  }
+      // Correção: usar generateContent diretamente
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text().trim();
 
-  async analyzeDetailedFeedback(feedbackData: FeedbackAnalysisInput): Promise<FeedbackAnalysisResult> {
-    try {
-      const systemPrompt = `Você é um especialista em análise de programas de mentoria. 
-Analise o feedback fornecido e retorne uma avaliação estruturada em JSON.
-Responda em português brasileiro, sendo construtivo e específico.`;
+      try {
+        // Tentar fazer parse do JSON retornado pela IA
+        const analysisResult = JSON.parse(text);
 
-      const userPrompt = `
-Analise esta sessão de mentoria:
-- Nota do encontro: ${feedbackData.meetingRating}/10
-- Experiência: "${feedbackData.experience}"
-- Engajamento da dupla: ${feedbackData.engagementRating}/10
-- Comentários: "${feedbackData.comments}"
-
-Forneça uma análise estruturada.
-`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-pro",
-        config: {
-          systemInstruction: systemPrompt,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "object",
-            properties: {
-              analysis: { 
-                type: "string",
-                description: "Análise geral da sessão (50-80 palavras)"
-              },
-              sentiment: { 
-                type: "string",
-                enum: ["positive", "neutral", "negative"],
-                description: "Sentimento geral do feedback"
-              },
-              recommendations: {
-                type: "array",
-                items: { type: "string" },
-                description: "Lista de recomendações específicas"
-              },
-              attentionPoints: {
-                type: "array",
-                items: { type: "string" },
-                description: "Pontos que requerem atenção"
-              }
-            },
-            required: ["analysis", "sentiment", "recommendations", "attentionPoints"]
-          }
-        },
-        contents: userPrompt,
-      });
-
-      const rawJson = response.text;
-      
-      if (rawJson) {
-        const result: FeedbackAnalysisResult = JSON.parse(rawJson);
-        return result;
-      } else {
-        throw new Error("Empty response from Gemini model");
-      }
-    } catch (error) {
-      console.error('Error with detailed feedback analysis:', error);
-      
-      // Fallback analysis based on ratings
-      const fallbackAnalysis = this.generateFallbackAnalysis(feedbackData);
-      return fallbackAnalysis;
-    }
-  }
-
-  private generateFallbackAnalysis(feedbackData: FeedbackAnalysisInput): FeedbackAnalysisResult {
-    const { meetingRating, engagementRating, experience, comments } = feedbackData;
-    
-    // Determine sentiment based on ratings
-    const avgRating = (meetingRating + engagementRating) / 2;
-    let sentiment: 'positive' | 'neutral' | 'negative';
-    
-    if (avgRating >= 8) sentiment = 'positive';
-    else if (avgRating >= 6) sentiment = 'neutral';
-    else sentiment = 'negative';
-
-    // Generate basic analysis
-    let analysis = '';
-    if (avgRating >= 8) {
-      analysis = 'A dupla demonstra excelente progresso com avaliações positivas. A mentoria está sendo eficaz e o engajamento é alto.';
-    } else if (avgRating >= 6) {
-      analysis = 'A dupla apresenta progresso satisfatório. Há oportunidades de melhoria na dinâmica da mentoria.';
-    } else {
-      analysis = 'A dupla necessita atenção especial. As avaliações indicam desafios que devem ser abordados prioritariamente.';
-    }
-
-    // Generate recommendations
-    const recommendations: string[] = [];
-    if (meetingRating < 7) {
-      recommendations.push('Revisar a estrutura e dinâmica dos encontros');
-    }
-    if (engagementRating < 7) {
-      recommendations.push('Trabalhar estratégias para aumentar o engajamento');
-    }
-    if (avgRating >= 8) {
-      recommendations.push('Manter a qualidade atual dos encontros');
-      recommendations.push('Considerar desafios mais avançados');
-    }
-
-    // Generate attention points
-    const attentionPoints: string[] = [];
-    if (comments.toLowerCase().includes('problema') || comments.toLowerCase().includes('dificuldade')) {
-      attentionPoints.push('Questões específicas mencionadas nos comentários');
-    }
-    if (meetingRating <= 5) {
-      attentionPoints.push('Baixa satisfação com os encontros');
-    }
-    if (engagementRating <= 5) {
-      attentionPoints.push('Baixo engajamento da dupla');
-    }
-
-    return {
-      analysis,
-      sentiment,
-      recommendations: recommendations.length > 0 ? recommendations : ['Continuar monitorando o progresso'],
-      attentionPoints: attentionPoints.length > 0 ? attentionPoints : []
-    };
-  }
-
-  async generateBulkFeedback(feedbackList: FeedbackAnalysisInput[]): Promise<string[]> {
-    const results: string[] = [];
-    
-    // Process in batches to avoid rate limiting
-    const batchSize = 5;
-    for (let i = 0; i < feedbackList.length; i += batchSize) {
-      const batch = feedbackList.slice(i, i + batchSize);
-      
-      const batchPromises = batch.map(feedback => this.analyzeFeedback(feedback));
-      const batchResults = await Promise.allSettled(batchPromises);
-      
-      batchResults.forEach(result => {
-        if (result.status === 'fulfilled') {
-          results.push(result.value);
-        } else {
-          console.error('Batch analysis failed:', result.reason);
-          results.push('Erro na análise de IA para este feedback');
+        // Validar se tem as propriedades necessárias
+        if (
+          !analysisResult.analysis ||
+          !analysisResult.sentiment ||
+          !analysisResult.sentimentScore
+        ) {
+          throw new Error(
+            "Resposta da IA não contém todos os campos necessários",
+          );
         }
-      });
 
-      // Add delay between batches to respect rate limits
-      if (i + batchSize < feedbackList.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Garantir que o sentiment é válido
+        if (
+          !["positivo", "neutro", "negativo"].includes(analysisResult.sentiment)
+        ) {
+          analysisResult.sentiment = "neutro";
+        }
+
+        // Garantir que o score está no range correto
+        if (
+          analysisResult.sentimentScore < 1 ||
+          analysisResult.sentimentScore > 10
+        ) {
+          analysisResult.sentimentScore = 5;
+        }
+
+        return analysisResult;
+      } catch (parseError) {
+        console.error("Erro ao fazer parse da resposta da IA:", parseError);
+        console.error("Resposta recebida:", text);
+
+        // Fallback: tentar extrair informações básicas da resposta
+        return {
+          analysis:
+            text.length > 0
+              ? text
+              : "Análise não pôde ser processada adequadamente.",
+          sentiment: "neutro",
+          sentimentScore: 5,
+        };
       }
-    }
-    
-    return results;
-  }
-
-  async analyzeProgramTrends(programData: { 
-    programName: string; 
-    feedbackList: FeedbackAnalysisInput[] 
-  }): Promise<string> {
-    try {
-      const avgMeetingRating = programData.feedbackList.reduce((sum, f) => sum + f.meetingRating, 0) / programData.feedbackList.length;
-      const avgEngagementRating = programData.feedbackList.reduce((sum, f) => sum + f.engagementRating, 0) / programData.feedbackList.length;
-      
-      const prompt = `
-Analise as tendências do programa de mentoria "${programData.programName}":
-
-Estatísticas gerais:
-- Total de sessões: ${programData.feedbackList.length}
-- Média de avaliação dos encontros: ${avgMeetingRating.toFixed(1)}/10
-- Média de engajamento: ${avgEngagementRating.toFixed(1)}/10
-
-Principais comentários e experiências:
-${programData.feedbackList.slice(0, 10).map((f, i) => `${i+1}. "${f.experience}" (Nota: ${f.meetingRating})`).join('\n')}
-
-Forneça uma análise das tendências do programa em 100-150 palavras, incluindo:
-1. Avaliação geral da performance do programa
-2. Padrões identificados
-3. Recomendações estratégicas para melhoria
-`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
-
-      return response.text || "Análise de tendências temporariamente indisponível";
-    } catch (error) {
-      console.error('Error analyzing program trends:', error);
-      throw new Error(`Failed to analyze program trends: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } catch (error: any) {
+      console.error("ERRO DETALHADO AO CHAMAR A API DO GEMINI:", error);
+      return {
+        analysis: "Análise de IA temporariamente indisponível.",
+        sentiment: "neutro",
+        sentimentScore: 5,
+      };
     }
   }
 }

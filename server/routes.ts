@@ -1,259 +1,278 @@
+// server/routes.ts
+
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { googleSheetsService } from "./services/googleSheets";
-import { geminiService } from "./services/gemini";
-import { z } from "zod";
+import { googleSheetsService } from "./services/googleSheets.js";
+import {
+  geminiService,
+  FeedbackAnalysisInput,
+  FeedbackAnalysisResult,
+} from "./services/gemini.js";
 import { dashboardFilters } from "@shared/schema";
 
+// Função para converter datas do formato "dd/mm/aaaa hh:mm:ss" para um objeto Date.
+function parseBrazilianDate(dateString: string): Date {
+  if (
+    !dateString ||
+    typeof dateString !== "string" ||
+    !dateString.includes("/")
+  ) {
+    return new Date(0);
+  }
+  try {
+    const [datePart, timePart] = dateString.split(" ");
+    if (!datePart) return new Date(0);
+    const [day, month, year] = datePart.split("/").map(Number);
+    const [hours = 0, minutes = 0, seconds = 0] = (timePart || "0:0:0")
+      .split(":")
+      .map(Number);
+    if (isNaN(day) || isNaN(month) || isNaN(year)) return new Date(0);
+    const date = new Date(year, month - 1, day, hours, minutes, seconds);
+    if (isNaN(date.getTime())) return new Date(0);
+    return date;
+  } catch (e) {
+    return new Date(0);
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Get dashboard data
   app.get("/api/dashboard-data", async (req, res) => {
     try {
       const { programa, notaEncontro } = req.query;
-      
-      // Validate query parameters
       const filters = dashboardFilters.parse({
         programa: programa as string,
         notaEncontro: notaEncontro as string,
       });
 
       const rawData = await googleSheetsService.fetchData();
-      
-      // Apply filters
       let filteredData = rawData;
-      
+
       if (filters.programa) {
-        filteredData = filteredData.filter(row => 
-          row.program.toLowerCase().includes(filters.programa!.toLowerCase())
+        filteredData = filteredData.filter((row) =>
+          row.program.toLowerCase().includes(filters.programa!.toLowerCase()),
         );
       }
-      
       if (filters.notaEncontro) {
-        const [min, max] = filters.notaEncontro.split('-').map(Number);
-        filteredData = filteredData.filter(row => {
+        const [min, max] = filters.notaEncontro.split("-").map(Number);
+        filteredData = filteredData.filter((row) => {
           const rating = parseInt(row.meetingRating);
-          return rating >= min && rating <= max;
+          return !isNaN(rating) && rating >= min && rating <= max;
         });
       }
 
-      // Calculate KPIs
-      const totalRespostas = filteredData.length;
-      
-      // Get unique pairs (assuming mentor-mentee pairs based on program and names)
-      const uniquePairs = new Set();
-      filteredData.forEach(row => {
-        const pairKey = `${row.program}-${row.fullName}`;
-        uniquePairs.add(pairKey);
-      });
-      const duplasAtivas = uniquePairs.size;
-      
-      // Calculate average meetings
-      // Looking at the data, most responses seem to indicate ongoing mentoring, so let's use a reasonable default calculation
-      const totalResponses = filteredData.length;
-      const activeResponses = filteredData.filter(row => 
-        row.meetingRating && parseInt(row.meetingRating) > 0
-      ).length;
-      
-      // Estimate based on response patterns - most mentoring programs have 3-5 meetings on average
-      const estimatedMeetings = activeResponses > 0 ? 
-        Math.round((activeResponses * 4.2) / Math.max(duplasAtivas, 1) * 10) / 10 : 0;
-      
-      const mediaEncontros = estimatedMeetings;
-      
-      // Count pairs with attention points (based on low ratings or negative feedback)
-      const duplasAtencao = filteredData.filter(row => {
-        const rating = parseInt(row.meetingRating);
-        const engagementRating = parseInt(row.engagementRating);
-        return rating < 7 || engagementRating < 7 || 
-               row.comments.toLowerCase().includes('problema') ||
-               row.comments.toLowerCase().includes('dificuldade');
-      }).length;
+      // ==========================================================
+      // CORREÇÕES NOS CÁLCULOS DE KPIS E GRÁFICOS
+      // ==========================================================
 
-      // Generate evaluation chart data
-      const ratingCounts = { 'insatisfeito': 0, 'ruim': 0, 'bom': 0, 'excelente': 0 };
-      filteredData.forEach(row => {
+      // KPIs
+      const totalRespostas = filteredData.length;
+      const duplasAtivas = new Set(filteredData.map((d) => d.email)).size; // Usando email como ID único da dupla
+      const duplasAtencao = filteredData.filter(
+        (row) =>
+          parseInt(row.meetingRating) < 7 || parseInt(row.engagementRating) < 7,
+      ).length;
+
+      // ✅ 1. Média de Encontros (Média da coluna J - meetingDuration)
+      const durations = filteredData
+        .map((row) => parseInt(row.meetingDuration))
+        .filter((d) => !isNaN(d) && d > 0);
+      const mediaEncontros =
+        durations.length > 0
+          ? parseFloat(
+              (durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(
+                1,
+              ),
+            )
+          : 0;
+
+      // Gráficos
+
+      // ✅ 2. Avaliação da Mentoria (Gráfico de Barras Horizontais)
+      const ratingCounts = { Excelente: 0, Bom: 0, Ruim: 0, Insatisfeito: 0 };
+      filteredData.forEach((row) => {
         const rating = parseInt(row.meetingRating);
         if (!isNaN(rating)) {
-          if (rating >= 0 && rating <= 5) ratingCounts['insatisfeito']++;
-          else if (rating >= 6 && rating <= 7) ratingCounts['ruim']++;
-          else if (rating === 8) ratingCounts['bom']++;
-          else if (rating >= 9 && rating <= 10) ratingCounts['excelente']++;
+          if (rating >= 9) ratingCounts["Excelente"]++;
+          else if (rating >= 8) ratingCounts["Bom"]++;
+          else if (rating >= 6) ratingCounts["Ruim"]++;
+          else ratingCounts["Insatisfeito"]++;
         }
       });
-
-      const evaluation = [
-        { name: 'Insatisfeito', value: ratingCounts['insatisfeito'] },
-        { name: 'Ruim', value: ratingCounts['ruim'] },
-        { name: 'Bom', value: ratingCounts['bom'] },
-        { name: 'Excelente', value: ratingCounts['excelente'] },
-      ];
-
-
-
-      // Generate program funnel data (based on meetings count)
-      const funnelData = { 'Não iniciou': 0, 'Início': 0, 'Meio': 0, 'Fim': 0 };
-      filteredData.forEach(row => {
-        const meetings = parseInt(row.meetingsCount);
-        if (meetings === 0) funnelData['Não iniciou']++;
-        else if (meetings >= 1 && meetings <= 3) funnelData['Início']++;
-        else if (meetings >= 4 && meetings <= 7) funnelData['Meio']++;
-        else funnelData['Fim']++;
-      });
-
-      const total = Object.values(funnelData).reduce((sum, count) => sum + count, 0);
-      const programFunnel = Object.entries(funnelData).map(([stage, count]) => ({
-        stage,
-        count,
-        percentage: total > 0 ? Math.round((count / total) * 100) : 0,
+      const evaluation = Object.entries(ratingCounts).map(([name, value]) => ({
+        name,
+        value,
       }));
 
-      // Generate comments analysis
-      const commentsAnalysis = [
-        { category: 'Positivos', count: 0, sentiment: 'positive' as const },
-        { category: 'Neutros', count: 0, sentiment: 'neutral' as const },
-        { category: 'Negativos', count: 0, sentiment: 'negative' as const },
-      ];
+      // ✅ 3. Funil do Programa (Análise da Coluna H - meetingsCount)
+      const funnelData = { "Não iniciou": 0, Início: 0, Meio: 0, Fim: 0 };
+      const uniqueDuplasForFunnel = new Set();
+      filteredData.forEach((row) => {
+        if (uniqueDuplasForFunnel.has(row.email)) return; // Contar cada dupla apenas uma vez
 
-      filteredData.forEach(row => {
-        const comment = row.comments.toLowerCase();
-        const experience = row.experience.toLowerCase();
-        const rating = parseInt(row.meetingRating);
+        const meetings = parseInt(row.meetingsCount);
+        if (isNaN(meetings)) return;
 
-        if (rating >= 8 || comment.includes('excelente') || comment.includes('ótimo') || experience.includes('positiva')) {
-          commentsAnalysis[0].count++;
-        } else if (rating <= 5 || comment.includes('problema') || comment.includes('dificuldade') || experience.includes('ruim')) {
-          commentsAnalysis[2].count++;
-        } else {
-          commentsAnalysis[1].count++;
-        }
+        if (meetings === 0) funnelData["Não iniciou"]++;
+        else if (meetings >= 1 && meetings <= 2) funnelData["Início"]++;
+        else if (meetings >= 3 && meetings <= 5) funnelData["Meio"]++;
+        else if (meetings >= 6) funnelData["Fim"]++;
+
+        uniqueDuplasForFunnel.add(row.email);
       });
-
-      // Generate mentor vs mentee analysis
-      const mentorData = filteredData.filter(row => row.userType.toLowerCase().includes('mentor'));
-      const menteeData = filteredData.filter(row => 
-        row.userType.toLowerCase().includes('mentorado') || 
-        row.userType.toLowerCase().includes('jovem')
+      const totalDuplasFunnel = uniqueDuplasForFunnel.size;
+      const programFunnel = Object.entries(funnelData).map(
+        ([stage, count]) => ({
+          stage,
+          count,
+          percentage:
+            totalDuplasFunnel > 0
+              ? Math.round((count / totalDuplasFunnel) * 100)
+              : 0,
+        }),
       );
 
-      const mentorVsMentee = [
-        {
-          userType: 'Mentores',
-          averageRating: mentorData.length > 0 ? 
-            mentorData.reduce((sum, row) => {
-              const rating = parseInt(row.meetingRating);
-              return sum + (isNaN(rating) ? 0 : rating);
-            }, 0) / mentorData.length : 0,
-          count: mentorData.length
-        },
-        {
-          userType: 'Mentorados',
-          averageRating: menteeData.length > 0 ? 
-            menteeData.reduce((sum, row) => {
-              const rating = parseInt(row.meetingRating);
-              return sum + (isNaN(rating) ? 0 : rating);
-            }, 0) / menteeData.length : 0,
-          count: menteeData.length
+      // ✅ 4. Mentores vs Mentorados (Análise da Coluna E - userType)
+      let mentorCount = 0;
+      let menteeCount = 0;
+      const uniqueUsersForCount = new Set();
+      filteredData.forEach((row) => {
+        if (uniqueUsersForCount.has(row.email)) return;
+
+        const userType = row.userType.toLowerCase();
+        if (userType.includes("mentor")) {
+          mentorCount++;
+        } else if (userType.includes("mentorado")) {
+          menteeCount++;
         }
+
+        uniqueUsersForCount.add(row.email);
+      });
+      // O gráfico de barras verticais espera essa estrutura
+      const mentorVsMentee = [
+        { userType: "Mentores", count: mentorCount },
+        { userType: "Mentorados", count: menteeCount },
       ];
 
-      // Get recent activities (last 5 entries)
-      const recentEntries = filteredData
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-        .slice(0, 5);
-
-      // Process AI feedback with rate limiting
-      const activities = [];
-      let requestCount = 0;
-      const maxRequests = 3; // Limit AI requests to avoid quota issues
-      
-      for (let i = 0; i < recentEntries.length; i++) {
-        const entry = recentEntries[i];
-        let aiFeedback = entry.aiFeedback;
-        
-        // Generate AI feedback if not present and within rate limit
-        if (!aiFeedback && requestCount < maxRequests) {
-          aiFeedback = await geminiService.analyzeFeedback({
-            meetingRating: parseInt(entry.meetingRating),
-            experience: entry.experience,
-            engagementRating: parseInt(entry.engagementRating),
-            comments: entry.comments,
-          });
-          
-          // Update the sheet with AI feedback if successful
-          if (aiFeedback && !aiFeedback.includes('temporariamente indisponível')) {
-            await googleSheetsService.updateAIFeedback(i + 1, aiFeedback);
-            requestCount++;
-          }
-        } else if (!aiFeedback) {
-          aiFeedback = 'Análise será gerada na próxima atualização para evitar limites de API';
+      // ✅ 5. Análise de Comentários (Usa o feedback da IA)
+      const sentimentCounts = { positivo: 0, neutro: 0, negativo: 0 };
+      filteredData.forEach((row) => {
+        const aiFeedback = (row.aiFeedback || "").toLowerCase();
+        if (aiFeedback.includes("[positivo]")) {
+          sentimentCounts.positivo++;
+        } else if (aiFeedback.includes("[negativo]")) {
+          sentimentCounts.negativo++;
+        } else if (aiFeedback.trim() !== "") {
+          // Se tiver feedback, mas não for positivo/negativo, é neutro
+          sentimentCounts.neutro++;
         }
+      });
+      const commentsAnalysis = [
+        {
+          category: "Positivos",
+          count: sentimentCounts.positivo,
+          sentiment: "positive" as const,
+        },
+        {
+          category: "Neutros",
+          count: sentimentCounts.neutro,
+          sentiment: "neutral" as const,
+        },
+        {
+          category: "Negativos",
+          count: sentimentCounts.negativo,
+          sentiment: "negative" as const,
+        },
+      ];
 
-        activities.push({
-          id: `${entry.timestamp}-${entry.email}`,
-          dupla: entry.fullName,
-          data: new Date(entry.timestamp).toLocaleString('pt-BR', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          destaque: entry.experience,
-          pontoAtencao: entry.comments || 'Nenhum ponto de atenção identificado',
-          feedbackIA: aiFeedback,
-          mentorAvatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 100000000)}?w=150&h=150&fit=crop&crop=face`,
-          menteeAvatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 100000000)}?w=150&h=150&fit=crop&crop=face`,
-        });
-      }
+      // Atividades Recentes
+      const recentEntries = filteredData
+        .sort(
+          (a, b) =>
+            parseBrazilianDate(b.timestamp).getTime() -
+            parseBrazilianDate(a.timestamp).getTime(),
+        )
+        .slice(0, 5);
+      const activities = recentEntries.map((entry) => ({
+        id: `${entry.timestamp}-${entry.email}`,
+        dupla: entry.fullName,
+        data: parseBrazilianDate(entry.timestamp).toLocaleString("pt-BR", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        destaque: entry.experience,
+        pontoAtencao: entry.comments,
+        feedbackIA: entry.aiFeedback || "Análise IA pendente.",
+        mentorAvatar: "",
+        menteeAvatar: "",
+      }));
 
       const responseData = {
-        kpis: {
-          totalRespostas,
-          duplasAtivas,
-          mediaEncontros,
-          duplasAtencao,
-        },
-        charts: {
-          evaluation,
-          programFunnel,
-          commentsAnalysis,
-          mentorVsMentee,
-        },
+        kpis: { totalRespostas, duplasAtivas, mediaEncontros, duplasAtencao },
+        charts: { evaluation, programFunnel, commentsAnalysis, mentorVsMentee },
         activities,
       };
-
       res.json(responseData);
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      res.status(500).json({ 
-        error: 'Failed to fetch dashboard data',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+    } catch (error: any) {
+      console.error("ERRO FATAL NA ROTA /api/dashboard-data:", error);
+      res
+        .status(500)
+        .json({
+          error: "Failed to fetch dashboard data",
+          details: error.message,
+        });
     }
   });
 
-  // Get filter options
   app.get("/api/filter-options", async (req, res) => {
+    /* ... seu código aqui ... */
+  });
+
+  app.post("/api/process-all-sheets", async (req, res) => {
     try {
-      const rawData = await googleSheetsService.fetchData();
-      
-      const programas = Array.from(new Set(rawData.map(row => row.program).filter(Boolean)));
-      
-      res.json({
-        programas,
-        notasEncontro: [
-          { value: '9-10', label: 'Excelente (9-10)' },
-          { value: '7-8', label: 'Bom (7-8)' },
-          { value: '5-6', label: 'Regular (5-6)' },
-          { value: '0-4', label: 'Ruim (0-4)' },
-        ],
-      });
+      console.log("Iniciando processamento em lote da planilha...");
+      const allData = await googleSheetsService.fetchData();
+      let processedCount = 0;
+
+      for (let i = 0; i < allData.length; i++) {
+        const row = allData[i];
+        if (row.aiFeedback && row.aiFeedback.trim() !== "") {
+          continue;
+        }
+
+        console.log(`Processando linha ${i + 2}: ${row.fullName}`);
+
+        const feedbackInput: FeedbackAnalysisInput = {
+          meetingRating: parseInt(row.meetingRating) || 0,
+          experience: row.experience,
+          engagementRating: parseInt(row.engagementRating) || 0,
+          comments: row.comments,
+        };
+
+        const aiResult: FeedbackAnalysisResult =
+          await geminiService.analyzeFeedback(feedbackInput);
+
+        const feedbackStringToSave = `[${aiResult.sentiment.toUpperCase()}] [${aiResult.sentimentScore}/10] ${aiResult.analysis}`;
+
+        await googleSheetsService.updateAIFeedback(i, feedbackStringToSave);
+        processedCount++;
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+
+      console.log(
+        `Processamento concluído. ${processedCount} linhas atualizadas.`,
+      );
+      res
+        .status(200)
+        .json({
+          message: "Processamento concluído!",
+          processedRows: processedCount,
+        });
     } catch (error) {
-      console.error('Error fetching filter options:', error);
-      res.status(500).json({ 
-        error: 'Failed to fetch filter options',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      console.error("Erro no processamento em lote:", error);
+      res.status(500).json({ error: "Falha no processamento em lote." });
     }
   });
 
